@@ -177,6 +177,7 @@ Cij_Aik_Bkj_SB_MT32x32x8_SN_K1_WGM1(
 
 
   /* local read addresses: tile assignments a/b */
+  // serial是Group中的线性ID
 
   unsigned int lr0I = (serial % SG0I);          // (0~15)
   unsigned int lr1J = (serial / SG0I) % SG1J;   // (1 / 16) % 16 = 0 (257 / 16) % 16 = 0
@@ -189,7 +190,7 @@ Cij_Aik_Bkj_SB_MT32x32x8_SN_K1_WGM1(
 
   /* local read addresses: final offsets b */
 
-  unsigned int localReadOffsetB = lr1J*VECTOR_WIDTH + sgId*(MT1J+PAD) + LDS_OFFSET_B; // 为什么加上LDS_OFFSET_B???
+  unsigned int localReadOffsetB = lr1J*VECTOR_WIDTH + sgId*(MT1J+PAD) + LDS_OFFSET_B; // 为什么加上LDS_OFFSET_B, 它是本地A的大小。
 
 
   /* local read addresses: declare addresses a */
@@ -210,30 +211,31 @@ Cij_Aik_Bkj_SB_MT32x32x8_SN_K1_WGM1(
 
   /* global read addresses: work-group */
 
-  unsigned int wg0I = hc_get_group_id(0);   // 获取当前工作组在第一个维度（x维度）上的ID
-  unsigned int wg1J = hc_get_group_id(1);   // 获取当前工作组在第二个维度（y维度）上的ID
-  unsigned int nwg0I = hc_get_num_groups(0); // 获取工作组在第一个维度（x维度）上的总数
-  unsigned int nwg1J = hc_get_num_groups(1); // 获取工作组在第一个维度（Y维度）上的总数
+  unsigned int wg0I = hc_get_group_id(0);   // 获取当前工作组在第一个维度（I维度）上的ID
+  unsigned int wg1J = hc_get_group_id(1);   // 获取当前工作组在第二个维度（J维度）上的ID
+  unsigned int nwg0I = hc_get_num_groups(0); // 获取工作组在第一个维度（I维度）上的总数
+  unsigned int nwg1J = hc_get_num_groups(1); // 获取工作组在第一个维度（J维度）上的总数
 
 
   /* global read addresses: tile offset assignment a */
+  // serial 为一个工作组的线性ID，在当前配置下范围0~255;
 
-  unsigned int globalReadOffsetA0I = (serial/* 1 */ % LVCA /* 32 */)*GLOBAL_LOAD_VECTOR_WIDTH_A /* 1 */ + (wg0I)*MT0I; // 1
+  unsigned int globalReadOffsetA0I = (serial % LVCA /* 32 */)*GLOBAL_LOAD_VECTOR_WIDTH_A /* 1 */ + (wg0I)*MT0I /* 工作组索引对应的偏移，需要加上MT系数 */;
 
 
   /* global read addresses: tile offset assignment b */
 
-  unsigned int globalReadOffsetB1J = (serial/LVCB) + (wg1J)*MT1J;  // 0
+  unsigned int globalReadOffsetB1J = (serial/LVCB/* 8 */) + (wg1J)*MT1J;
 
 
   /* global read addresses: unroll assignment a */
 
-  unsigned int globalReadOffsetAK = (serial /* 1 */ / LVCA /* 32 */); // 0
+  unsigned int globalReadOffsetAK = (serial / LVCA /* 32 */); // 0
 
 
   /* global read addresses: unroll assignment b */
 
-  unsigned int globalReadOffsetBK = (serial%LVCB)*GLOBAL_LOAD_VECTOR_WIDTH_B;
+  unsigned int globalReadOffsetBK = (serial%LVCB)*GLOBAL_LOAD_VECTOR_WIDTH_B /* 1 */;
 
 
   /* global read addresses: tile offsets a */
@@ -261,29 +263,21 @@ Cij_Aik_Bkj_SB_MT32x32x8_SN_K1_WGM1(
 
 
   /* global read addresses: final offsets a */
-  // globalReadOffsetA0I_0_0: 1
-  // globalReadOffsetAK_0_0: 0
-  // globalReadOffsetA_0_0_0_0: 1
-
   int64_t globalReadOffsetA_0_0_0_0 = GLOBAL_OFFSET_A( (globalReadOffsetA0I_0_0), (globalReadOffsetAK_0_0) );
 
 
   /* global read addresses: final offsets b */
-  // globalReadOffsetBK_0_0: 1
-  // globalReadOffsetB1J_0_0: 0
-  // globalReadOffsetB_0_0_0_0: 1
-
   int64_t globalReadOffsetB_0_0_0_0 = GLOBAL_OFFSET_B( (globalReadOffsetBK_0_0), (globalReadOffsetB1J_0_0) );
 
 
   /* global read addresses: addresses a */
 
-  DATA_TYPE const *globalReadA_0_0_0_0 = A + globalReadOffsetA_0_0_0_0; // A[1]
+  DATA_TYPE const *globalReadA_0_0_0_0 = A + globalReadOffsetA_0_0_0_0;
 
 
   /* global read addresses: addresses b */
 
-  DATA_TYPE const *globalReadB_0_0_0_0 = B + globalReadOffsetB_0_0_0_0; // B[1]
+  DATA_TYPE const *globalReadB_0_0_0_0 = B + globalReadOffsetB_0_0_0_0;
 
 
   /* global read addresses: increments a */
@@ -302,7 +296,7 @@ Cij_Aik_Bkj_SB_MT32x32x8_SN_K1_WGM1(
 
 
   /* local write addresses: tile assignment A */
-  unsigned int lwA0I = (serial%LVCA)*GLOBAL_LOAD_VECTOR_WIDTH_A;
+  unsigned int lwA0I = (serial%LVCA)*GLOBAL_LOAD_VECTOR_WIDTH_A /* 1 */;
 
 
   /* local write addresses: tile assignment B */
@@ -316,14 +310,15 @@ Cij_Aik_Bkj_SB_MT32x32x8_SN_K1_WGM1(
   /* local write addresses: unroll assignment B */
   unsigned int lwBK = (serial%LVCB)*GLOBAL_LOAD_VECTOR_WIDTH_B;
 
+  // 以上计算步骤与全局的读地址计算逻辑一致。
+
 
   /* local write addresses: first offset a */
-
+  // 存A的逻辑与原始逻辑是一致的
   unsigned int localWriteFirstOffsetA = lwA0I + lwAK*(MT0I+PAD);
 
-
   /* local write addresses: first offset b */
-
+  // 存B的逻辑不一致，相当于对原始数据做了转置。因为是B的列乘以A的行，此时对B的数据转置可以在内核计算时顺序取。
   unsigned int localWriteFirstOffsetB = lwB1J + lwBK*(MT1J+PAD) + LDS_OFFSET_B;
 
 
@@ -459,10 +454,10 @@ VECTOR_WIDTH
     rB[0*VECTOR_WIDTH+1] = localReadB[0*SG1J*VECTOR_WIDTH + 1]; 
 
     /* local read increment a */
-    localReadA += LOCAL_SPLITU*(MT0I+PAD);
+    localReadA += LOCAL_SPLITU*(MT0I+PAD); // 获取下一组顺序数据地址
 
     /* local read increment b */
-    localReadB += LOCAL_SPLITU*(MT1J+PAD);
+    localReadB += LOCAL_SPLITU*(MT1J+PAD); //获取下一组顺序数据地址
     MAC_2x2
 
 
