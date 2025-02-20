@@ -610,6 +610,7 @@ VECTOR_WIDTH
 
 
   /* Compute tail loop num iter */
+  // 计算sizeK剩余大小
   numIterK = (((sizeK % LOCAL_DEPTHU) + LOCAL_SPLITU - 1) / LOCAL_SPLITU);
 
 
@@ -628,6 +629,7 @@ VECTOR_WIDTH
 
 
   /* global read A */
+  // 由于此时剩余的块已经小于32x8，有的线程已经不需要读全局数据，直接复制SCALAR_OOB_DATA=0.0
   a_0_0_0_0 = ( globalReadOffsetAK_0_0  + 0 >= (sizeK % LOCAL_DEPTHU) ) ? SCALAR_OOB_DATA : *(globalReadA_0_0_0_0 + 0);
 
 
@@ -639,6 +641,7 @@ VECTOR_WIDTH
 
 
   /* global read B */
+  // 由于此时剩余的块已经小于32x8，有的线程已经不需要读全局数据，直接复制SCALAR_OOB_DATA=0.0
   b_0_0_0_0 = ( globalReadOffsetBK_0_0  + 0 >= (sizeK % LOCAL_DEPTHU) ) ? SCALAR_OOB_DATA : *(globalReadB_0_0_0_0 + 0);
 
 
@@ -679,6 +682,7 @@ VECTOR_WIDTH
 
   /* tail loop: macs */
 
+  // 每次迭代一次
   while (numIterK-- > 0) {
 
 
@@ -704,6 +708,7 @@ VECTOR_WIDTH
     localReadB += LOCAL_SPLITU*(MT1J+PAD);
 
 
+    // 有些线程的操作数是0
     MAC_2x2
 
   }
