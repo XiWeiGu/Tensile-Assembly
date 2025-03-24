@@ -996,6 +996,8 @@ _v_add_co_u32 v[vgprLocalReadAddrB+0], vcc_lo, 0x1000, v[vgprLocalReadAddrB+0] /
 /* LVCA = 32 */
 /* v0 = (local)groA-tile = serial%LVCA (note (wgA*MTA) will be added to SRD) */
 /* v1 = groA-unroll = serial/LVCA */
+// unsigned int globalReadOffsetA0I = (serial % LVCA /* 32 */)*GLOBAL_LOAD_VECTOR_WIDTH_A /* 1 */ + (wg0I)*MT0I /* 工作组索引对应的偏移，需要加上MT系数, v0, 这里只做了前半部分，没有加(wg0I)*MT0I
+// unsigned int globalReadOffsetAK = (serial / LVCA /* 32 */); // 0, v1
 v_and_b32 v2, 31, v[vgprSerial]                    // v2 = v[vgprSerial] % 32 gxw 0 ~ 31, wave里面的相对ID
 v_lshrrev_b32 v1, 5, v2                            // v1 = v2 / 32 gxw v1=0
 v_and_b32 v0, 31, v2                               // v0 = v2 % 32 gxw v0 = v2
@@ -1004,7 +1006,7 @@ s_lshr_b32 s6, s6, 0x5                             // WaveId
 s_mul_i32 s6, s6, 4                                // Global Read Wave: each wave loads continuous lsp(1)*nrp(4) columns
 _v_add_u32 v1, s6, v1                              // Global Read Wave: add back to column index
 /* gro-tile *= glvw */
-v_lshlrev_b32 v0, 0x1, v0                          // v0 = v0 * 2
+v_lshlrev_b32 v0, 0x1, v0                          // v0 = v0 * 2, (0, 2, 4, ..., 62)水平方向线程间隔,还要在乘2(nlc)
 
 
 /* global read addresses: tile offset assignment b */
@@ -1018,14 +1020,15 @@ v_and_b32 v3, 7, v4                                // v3 = v4 % 8 gxw 0 ~ 7
 v_readfirstlane_b32 s6, v[vgprSerial]              // WaveIdxWavefrontWidth
 s_lshr_b32 s6, s6, 0x5                             // WaveId
 s_mul_i32 s6, s6, 32                               // Global Read Wave: each wave loads continuous lsp(4)*nrp(8) columns
-_v_add_u32 v2, s6, v2                              // Global Read Wave: add back to column index
+_v_add_u32 v2, s6, v2                              // Global Read Wave: add back to column index 垂直方向间隔
+                                                   // 0, 32, 64, 96
 /* gro-unroll *= glvw */
-v_lshlrev_b32 v3, 0x1, v3                          // v3 = v3 * 2
+v_lshlrev_b32 v3, 0x1, v3                          // v3 = v3 * 2 (0, 2, 4, ..., 14)
 
 
 /******************************************/
 /* Local Write Addresses                  */
-/******************************************/
+global read addresses: work-group/******************************************/
 
 /* lwaTileAssignmentA = v0 */
 
@@ -1038,13 +1041,14 @@ v_lshlrev_b32 v3, 0x1, v3                          // v3 = v3 * 2
 
 /* local write addresses: first offset a */
 
-v_mul_u32_u24 v[vgprLocalWriteAddrA], 0x80, v1     // lwAK**(MTA + PAD)
+v_mul_u32_u24 v[vgprLocalWriteAddrA], 0x80, v1     // lwAK**(MTA + PAD) 垂直间隔(0, 4, 8, 12) * 128
 _v_add_lshl_u32 v[vgprLocalWriteAddrA], v0, v[vgprLocalWriteAddrA], 0x1 // lwFOA = (lwAA + lwAK*(MT0I+PAD))*bpe
+// 处理水平度间隔，每个线程水平读4个
 
 
 /* local write addresses: first offset b */
 
-v_mul_u32_u24 v[vgprLocalWriteAddrB], 0x10, v2     // lwBK**(DepthU_Compute + PAD)
+v_mul_u32_u24 v[vgprLocalWriteAddrB], 0x10, v2     // lwBK**(DepthU_Compute + PAD) 垂直间隔(0, 32, 64, 96) * 16
 _v_add_lshl_u32 v[vgprLocalWriteAddrB], v3, v[vgprLocalWriteAddrB], 0x1 // lwFOB = (lwBB + lwBK*(DepthU+PAD))*bpe
 v_lshrrev_b32 v4, 7, v[vgprLocalWriteAddrB]        // padding 8 per block 128
 v_lshlrev_b32 v4, 0x4, v4                          // padding 8 per block 128
@@ -1084,6 +1088,7 @@ label_AlphaNonZero:
 
 
 /* global read addresses: work-group */
+// 工作组串行编号（wgSerial）的计算公式为：wgSerial = wg0 + (wg1 % WorkGroupMapping) * nwg0。其中，wg0 和 wg1 是工作组编号，WorkGroupMapping 是工作组映射参数（即上述的 N 或 WGM 值），nwg0 是工作组 0 的数量。
 
 /* graWorkGroup mapping */
 s_mov_b32 s55, 0x10000001L                         // magic number for WGM==8
@@ -1093,7 +1098,8 @@ s_lshr_b64 s[52:53], s[52:53], 31                  // sMagicDiv
 s_mul_i32 s53, s52, 8                              // quotient * non-magic divisor
 s_sub_u32 s53, s[sgprWorkGroup1], s53              // WorkGroup1=remainder
 s_mul_i32 s53, s53, s[sgprNumWorkGroups0]          // (wg1 % WGM)*nwg0
-s_add_u32 s53, s53, s[sgprWorkGroup0]              // wgSerial = wg0 + (wg1 % WGM)*nwg1
+s_add_u32 s53, s53, s[sgprWorkGroup0]              // wgSerial = wg0 + (wg1 % WGM)*nwg1, 工作组串行编号
+
 s_cmp_ge_u32 s52, s[sgprNumFullBlocks]             // blockId >= numFullBlocks ?
 s_cmov_b32 s55, s[sgprMagicNumberWgmRemainder1]    // 
 s_cselect_b32 s54, s[sgprWgmRemainder1], 8         // 
@@ -1158,6 +1164,7 @@ v_min_i32 v5, v19, v5                              // offset = (offset < edge) ?
 
 
 /* global read addresses: final offsets a */
+// vgprGlobalReadOffsetA 与vgprGlobalReadOffsetB是WorkGroup内部偏移
 
 GLOBAL_OFFSET_A vgprGlobalReadOffsetA+0,  4, 14, 19 // gROA_0_0_0_0
 GLOBAL_OFFSET_A vgprGlobalReadOffsetA+1,  5, 14, 19 // gROA_1_0_0_0
@@ -1182,6 +1189,7 @@ GLOBAL_OFFSET_B vgprGlobalReadOffsetB+7, 18, 13, 14 // gROB_0_0_7_0
 
 
 /* global read addresses: addresses a */
+// sgprSrdA 和 sgprSrdB是WorkGroup相对于整体的偏移
 
 /* max read offset = size[n] * stride[n-1] */
 s_mul_hi_u32 s55, s[sgprWorkGroup0], 128           // WorkGroup[01] * MT

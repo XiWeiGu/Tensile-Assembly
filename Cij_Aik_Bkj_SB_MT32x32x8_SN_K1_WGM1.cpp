@@ -150,6 +150,7 @@ Cij_Aik_Bkj_SB_MT32x32x8_SN_K1_WGM1(
 
   // Assume: serial = 1, 257
 
+  // I是水平方向(wg0)，J是垂直方向(wg1)
   unsigned int serial = hc_get_workitem_id(0); // 是线性ID究竟是局部的还是全局的??,先假设是局部的那范围是0~255
   unsigned int sgId = serial / (SG0I*SG1J);    // 工作项所在工作组ID, 恒为0??
 #define SCALAR_ZERO (float)(0)
