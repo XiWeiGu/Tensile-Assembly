@@ -993,6 +993,21 @@ _v_add_co_u32 v[vgprLocalReadAddrB+0], vcc_lo, 0x1000, v[vgprLocalReadAddrB+0] /
 
 /* global read addresses: tile offset assignment a */
 
+
+/* 前置说明
+   1. LVCA 与 LVCB 是如何计算？
+   从cpp文件中有：
+   #define LSCA (MT0I/NLCA)                           
+   #define LSCB (LOCAL_DEPTHU/NLCB)                   
+   #define LVCA (LSCA/GLOBAL_LOAD_VECTOR_WIDTH_A)     
+   #define LVCB (LSCB/GLOBAL_LOAD_VECTOR_WIDTH_B)     
+   从《汇编文件内核分析.md》已经知道对于A矩阵nlcxnlp=2x4，B矩阵nlcxnlp=1x8
+   所以LSCA = 128 / 2 = 64, LVCA = 64 / 2 = 32;
+       LSCB = 16 / 1  = 16, LVCB = 16 / 2 = 8 
+   2. 该汇编文件实现一个group中有4个wave，从全局上将这4个wave是如何读取A以及B的。
+   A矩阵是128x16， 每个wave读的是128x4;B矩阵是16x128, 每个矩阵是16x(8+8+8+8),每个列方向的8不是连续的，间隔32。
+*/
+
 /* LVCA = 32 */
 /* v0 = (local)groA-tile = serial%LVCA (note (wgA*MTA) will be added to SRD) */
 /* v1 = groA-unroll = serial/LVCA */
@@ -1004,8 +1019,11 @@ v_and_b32 v0, 31, v2                               // v0 = v2 % 32 gxw v0 = v2
 v_readfirstlane_b32 s6, v[vgprSerial]              // WaveIdxWavefrontWidth
 s_lshr_b32 s6, s6, 0x5                             // WaveId
 s_mul_i32 s6, s6, 4                                // Global Read Wave: each wave loads continuous lsp(1)*nrp(4) columns
-_v_add_u32 v1, s6, v1                              // Global Read Wave: add back to column index
+_v_add_u32 v1, s6, v1                              // Global Read Wave: add back to column index 0, 4, 8, 12
+// v1是每个wave加载A列方向上的索引，因为每个wave加载的A的块大小是128x4, 4是列大小。所以第一个wave的起始应该是列索引0，其它的依次递增
 /* gro-tile *= glvw */
+// globalReadOffsetA0I = v0 = (serial % LVCA /* 32 */)*GLOBAL_LOAD_VECTOR_WIDTH_A /* 1 */  /* + (wg0I)*MT0I */
+// 后面的(wg0I)*MT0I不需要加上了，因为每个wave加载的A的块大小是128x4， 128是行大小，已经等于MT0I, 已经可以被一个wave读满
 v_lshlrev_b32 v0, 0x1, v0                          // v0 = v0 * 2, (0, 2, 4, ..., 62)水平方向线程间隔,还要在乘2(nlc)
 
 
@@ -1022,7 +1040,9 @@ s_lshr_b32 s6, s6, 0x5                             // WaveId
 s_mul_i32 s6, s6, 32                               // Global Read Wave: each wave loads continuous lsp(4)*nrp(8) columns
 _v_add_u32 v2, s6, v2                              // Global Read Wave: add back to column index 垂直方向间隔
                                                    // 0, 32, 64, 96
+// v2是每个wave加载B列方向上的索引，因为每个wave加载的A的块大小是16x32, 32是列大小。所以第一个wave的起始应该是列索引0，其它的依次递增
 /* gro-unroll *= glvw */
+// globalReadOffsetBK = v3 = (serial%LVCB)*GLOBAL_LOAD_VECTOR_WIDTH_B
 v_lshlrev_b32 v3, 0x1, v3                          // v3 = v3 * 2 (0, 2, 4, ..., 14)
 
 
@@ -1041,8 +1061,9 @@ global read addresses: work-group/******************************************/
 
 /* local write addresses: first offset a */
 
+// unsigned int localWriteFirstOffsetA = lwA0I/* v0 */ + lwAK /* v1 */ *(MT0I /* 128 */ + PAD);
 v_mul_u32_u24 v[vgprLocalWriteAddrA], 0x80, v1     // lwAK**(MTA + PAD) 垂直间隔(0, 4, 8, 12) * 128
-_v_add_lshl_u32 v[vgprLocalWriteAddrA], v0, v[vgprLocalWriteAddrA], 0x1 // lwFOA = (lwAA + lwAK*(MT0I+PAD))*bpe
+_v_add_lshl_u32 v[vgprLocalWriteAddrA], v0, v[vgprLocalWriteAddrA], 0x1 // lwFOA = (lwAA + lwAK*(MT0I+PAD))*bpe, bpe代表bytes per Element，该汇编文件处理的数据类型是half，两个字节
 // 处理水平度间隔，每个线程水平读4个
 
 
@@ -1050,14 +1071,13 @@ _v_add_lshl_u32 v[vgprLocalWriteAddrA], v0, v[vgprLocalWriteAddrA], 0x1 // lwFOA
 
 v_mul_u32_u24 v[vgprLocalWriteAddrB], 0x10, v2     // lwBK**(DepthU_Compute + PAD) 垂直间隔(0, 32, 64, 96) * 16
 _v_add_lshl_u32 v[vgprLocalWriteAddrB], v3, v[vgprLocalWriteAddrB], 0x1 // lwFOB = (lwBB + lwBK*(DepthU+PAD))*bpe
+
 v_lshrrev_b32 v4, 7, v[vgprLocalWriteAddrB]        // padding 8 per block 128
 v_lshlrev_b32 v4, 0x4, v4                          // padding 8 per block 128
 _v_add_u32 v[vgprLocalWriteAddrB], v4, v[vgprLocalWriteAddrB] // add padding 8 per block 128
-_v_add_co_u32 v[vgprLocalWriteAddrB], vcc_lo, 0x1000, v[vgprLocalWriteAddrB] // lwFOB = lwB1J + lwBK*MT1J + LDS_OFFSET_B=2048*2
+// 这里有间隔在yaml中控制，LdsPadB:[8]
 
-
-
-
+_v_add_co_u32 v[vgprLocalWriteAddrB], vcc_lo, 0x1000, v[vgprLocalWriteAddrB] // lwFOB = lwB1J + lwBK*MT1J + LDS_OFFSET_B=2048*2, 2048*2是ldsa的大小
 
 
 
