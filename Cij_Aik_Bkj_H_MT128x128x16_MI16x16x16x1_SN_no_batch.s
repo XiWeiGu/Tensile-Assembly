@@ -945,6 +945,12 @@ v_mov_b32 v[vgprSerial], v0                        // thread serial id
 
 
 /* local read addresses: tile assignments a/b */
+// 线程读本地数据共享数据，在workgropu里面是共享的，理解为一维数据。
+// 要区分开wave并且wave内的线程错开
+// 由于使用了wmma指令，WMMA要求在wave32模式中的wave通道0-15和通道16-31之间复制A_frag和B_frag的内容。
+// 这意味着对于wave32模式，通道0中的每个VGPR必须具有与通道16中的每个VGPR完全相同的矩阵数据。
+// 通道1对应通道17，以此类推，一直到通道15对应通道31。这有效地在两个half-waves之间维持了矩阵数据的两个副本。
+// 这就表示每个wave 0～15 16～31线程的A,B偏移是相同的。
 
 /*lr0I*/
 v_and_b32 v1, 31, v[vgprSerial]                    // 0. thread id in wave: wtid = tid % wavelength(32)
@@ -952,6 +958,7 @@ v_and_b32 v0, 15, v1                               // 1. N offset: nIdx = wtid %
                                                    // 1. N offset: nOffset = nIdx * nStride(1) (multiplier is 1, do nothing)
                                                    // 2. block offset: bnIdx = bnIdx % num1DBlocks(1) is 0. do nothing
 v_lshlrev_b32 v0, 0x1, v0                          // 4. apply VectorWidth: bnOffset = bnOffset * vw(2)
+
 v_lshrrev_b32 v2, 5, v[vgprSerial]                 // 7. wave offset in N dimen: wtid = tid / dividedForWaveId(32)
 v_and_b32 v1, 1, v2                                // 7. wave offset in M dimen: wtid0 = wtid / num1DWaves(2)
 v_lshlrev_b32 v1, 0x5, v1                          // 7. wave offset in M dimen: wOffset = wtid0 * W0Stride(32)
@@ -962,6 +969,7 @@ v_and_b32 v1, 15, v2                               // 1. N offset: nIdx = wtid %
 v_lshlrev_b32 v1, 0x4, v1                          // 1. N offset: nOffset = nIdx * nStride(16)
                                                    // 2. block offset: bnIdx = bnIdx % num1DBlocks(1) is 0. do nothing
 v_lshlrev_b32 v1, 0x1, v1                          // 4. apply VectorWidth: bnOffset = bnOffset * vw(2)
+
 v_lshrrev_b32 v3, 6, v[vgprSerial]                 // 7. wave offset in N dimen: wtid = tid / dividedForWaveId(64)
 v_and_b32 v2, 1, v3                                // 7. wave offset in M dimen: wtid0 = wtid / num1DWaves(2)
 v_lshlrev_b32 v2, 0x9, v2                          // 7. wave offset in M dimen: wOffset = wtid0 * W0Stride(512)
@@ -1075,7 +1083,8 @@ _v_add_lshl_u32 v[vgprLocalWriteAddrB], v3, v[vgprLocalWriteAddrB], 0x1 // lwFOB
 v_lshrrev_b32 v4, 7, v[vgprLocalWriteAddrB]        // padding 8 per block 128
 v_lshlrev_b32 v4, 0x4, v4                          // padding 8 per block 128
 _v_add_u32 v[vgprLocalWriteAddrB], v4, v[vgprLocalWriteAddrB] // add padding 8 per block 128
-// 这里有间隔在yaml中控制，LdsPadB:[8]
+// 这里有间隔在yaml中控制，LdsPadB:[8], 这里的8表示的是8个Element, 也就是16字节
+// 以0号线程和8号线程为例，此时他们之间的padding是64个字节
 
 _v_add_co_u32 v[vgprLocalWriteAddrB], vcc_lo, 0x1000, v[vgprLocalWriteAddrB] // lwFOB = lwB1J + lwBK*MT1J + LDS_OFFSET_B=2048*2, 2048*2是ldsa的大小
 
