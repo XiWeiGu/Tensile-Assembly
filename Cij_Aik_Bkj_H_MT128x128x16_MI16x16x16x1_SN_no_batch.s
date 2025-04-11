@@ -1001,6 +1001,9 @@ _v_add_co_u32 v[vgprLocalReadAddrB+0], vcc_lo, 0x1000, v[vgprLocalReadAddrB+0] /
 
 /* global read addresses: tile offset assignment a */
 
+// 全局读A,B的计算思路： 1. 计算整个group在全局的索引，使用sgprSrdA 和 sgprSrdB表示;
+//                       2. 计算group内部线程的相对偏移，使用vgprGlobalReadOffsetA 与vgprGlobalReadOffsetB表示。
+// 在循环跑起来时候相对偏移是不变的，需要重新定位sgprSrdA sgprSrdB，获取当期group读全局数据的偏移。
 
 /* 前置说明
    1. LVCA 与 LVCB 是如何计算？
@@ -1052,6 +1055,8 @@ _v_add_u32 v2, s6, v2                              // Global Read Wave: add back
 /* gro-unroll *= glvw */
 // globalReadOffsetBK = v3 = (serial%LVCB)*GLOBAL_LOAD_VECTOR_WIDTH_B
 v_lshlrev_b32 v3, 0x1, v3                          // v3 = v3 * 2 (0, 2, 4, ..., 14)
+
+// 以上计算我们得到整个group内每个线程相对偏移A(v0, v1),以及B(v3, v2) 
 
 
 /******************************************/
@@ -1153,14 +1158,15 @@ s_add_u32 s[sgprWorkGroup1], s[sgprWorkGroup1], s52 // wg1 += blockId * WGM
 
 /* global read addresses: tile offsets a */
 
+// 可以看到nlca = 2, 但是在水平方向上不是连续的，而是存在64的间隔
 v_mov_b32 v4, v0                                   // groA0I_0
-_v_add_co_u32 v5, vcc_lo, 64, v4                   // groA0I_1 += LSCA
+_v_add_co_u32 v5, vcc_lo, 64, v4                   // groA0I_1 += LSCA LSCA = MacroTileA / nlca = 128 / 2 = 64
 
 
 /* global read addresses: tile offsets b */
-
+// nlpb = 8, 计算垂直方向的索引， 读B垂直方向上是间隔的
 v_mov_b32 v6, v2                                   // groB1J_0
-_v_add_co_u32 v7, vcc_lo, 4, v6                    // groB1J_1 += LSPB
+_v_add_co_u32 v7, vcc_lo, 4, v6                    // groB1J_1 += LSPB LSPB = ?MacroTileB(128 / 4) / nlpb = 32 / 8 = 4
 _v_add_co_u32 v8, vcc_lo, 4, v7                    // groB1J_2 += LSPB
 _v_add_co_u32 v9, vcc_lo, 4, v8                    // groB1J_3 += LSPB
 _v_add_co_u32 v10, vcc_lo, 4, v9                   // groB1J_4 += LSPB
@@ -1171,8 +1177,9 @@ _v_add_co_u32 v13, vcc_lo, 4, v12                  // groB1J_7 += LSPB
 
 /* global read addresses: unroll offsets a */
 
+// nlpa = 4, 读A垂直方向上是连续的 
 v_mov_b32 v14, v1                                  // groAK_0
-_v_add_co_u32 v15, vcc_lo, 1, v14                  // groAK_1 + LSPA
+_v_add_co_u32 v15, vcc_lo, 1, v14                  // groAK_1 + LSPA LSPA = DepthU(16 / 4) / nlpa = 4 / 4 = 1, 注意此时DepthU是4,而并非16
 _v_add_co_u32 v16, vcc_lo, 1, v15                  // groAK_2 + LSPA
 _v_add_co_u32 v17, vcc_lo, 1, v16                  // groAK_3 + LSPA
 
