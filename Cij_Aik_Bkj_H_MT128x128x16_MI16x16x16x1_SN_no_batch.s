@@ -1288,6 +1288,8 @@ s_mov_b32 s[sgprOrigLoopCounter], s[sgprLoopCounterK] // copy loop counter
 
 s_and_b32 s[sgprStaggerUIter], s[sgprOrigStaggerUIter], s[sgprWorkGroup0] // Compute actual stagger start for this tile
 s_lshl_b32 s[sgprStaggerUIter], s[sgprStaggerUIter], 3 // shift by StaggerUStride
+// staggerStrideShift = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
+//                    = math.log((256 / (16 * 2)), 2) = 3
 
 
 /* SRDs += (StaggerUIter) * GlobalReadIncsA+0 */
