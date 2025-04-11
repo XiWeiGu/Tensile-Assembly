@@ -1278,6 +1278,14 @@ s_mov_b32 s[sgprGlobalReadIncsB+0], DepthU*BpeB    // incrB (unrollIdx)
 s_lshr_b32 s[sgprLoopCounterK], s[sgprSizesSum+0], 4 // s[sgprLoopCounterK] = s[sgprSizesSum+0] / 16
 s_mov_b32 s[sgprOrigLoopCounter], s[sgprLoopCounterK] // copy loop counter
 
+
+//主要用于 矩阵计算（如GEMM）中的交错内存访问优化（Staggered Memory Access）,
+// 目的是减少DRAM通道竞争并提高内存带宽利用率。
+//这段代码的主要功能是：
+//计算交错偏移（Stagger Offset）：根据 WorkGroupID 和 OrigStaggerUIter 确定每个 WorkGroup 在 K 维度（求和维度）的起始位置。
+//调整内存基地址（SRD）：将计算出的偏移量应用到全局内存的基地址上，实现交错访问。
+//边界检查（Shadow Limit）：确保内存访问不会越界。
+
 s_and_b32 s[sgprStaggerUIter], s[sgprOrigStaggerUIter], s[sgprWorkGroup0] // Compute actual stagger start for this tile
 s_lshl_b32 s[sgprStaggerUIter], s[sgprStaggerUIter], 3 // shift by StaggerUStride
 
@@ -1296,6 +1304,8 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s53 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimitA // Move shadow to real if we are within 2^32
 
+// 回绕地址：GlobalReadInc - (LoopCounterK * GlobalReadInc)
+
 
 /* SRDs += (StaggerUIter) * GlobalReadIncsB+0 */
 s_mul_hi_u32 s53, s[sgprStaggerUIter], s[sgprGlobalReadIncsB+0] //  stagger byte offset
@@ -1310,7 +1320,9 @@ s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s52 // limit -= inc)
 s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s53 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitB+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimitB // Move shadow to real if we are within 2^32
+
 s_add_u32 s[sgprStaggerUIter], s[sgprStaggerUIter], 2 // Subtract (PGR-1); StaggerUIter now contains target iteration to wrap
+// 补偿预取带来的偏移,虽然我不知道需要为什么+2，但是跟着调试返现也只有+2逻辑上才是正确的。
 
 /* local read addresses: init pointers a */
 
@@ -1329,7 +1341,10 @@ s_cmp_eq_u32 s[sgprLoopCounterK], 0                // at last iteration?
 s_cbranch_scc1 ShadowInitStart_10                  // skip to ShadowInitStart iter b/c numIter==0
 
 
-_buffer_load_b32 v[vgprG2LA+0], v[vgprGlobalReadOffsetA+0], s[sgprSrdA:sgprSrdA+3], 0, offen offset:0 // G -> Reg 0_0_0_0
+// 在循环前先预取数据
+// 将取数据和使用数据交错，避免数据依赖，与CPU优化的思想类似
+
+_buffer_load_b32 v[vgprG2LA+0], v[vgprGlobalReadOffsetA+0], s[sgprSrdA:sgprSrdA+3], 0, offen offset:0 // G -> Reg 0_0_0_0 s[sgprSrdA:sgprSrdA+1]表示基地址，s[sgprSrdA+2]内存范围限制，s[sgprSrdA+3]控制字段
 _buffer_load_b32 v[vgprG2LA+1], v[vgprGlobalReadOffsetA+1], s[sgprSrdA:sgprSrdA+3], 0, offen offset:0 // G -> Reg 1_0_0_0
 _buffer_load_b32 v[vgprG2LA+2], v[vgprGlobalReadOffsetA+2], s[sgprSrdA:sgprSrdA+3], 0, offen offset:0 // G -> Reg 0_0_1_0
 _buffer_load_b32 v[vgprG2LA+3], v[vgprGlobalReadOffsetA+3], s[sgprSrdA:sgprSrdA+3], 0, offen offset:0 // G -> Reg 1_0_1_0
@@ -1597,7 +1612,7 @@ LoopBeginK_1:
 /* Unrolled Loop 1/2 - Begin              */
 /******************************************/
 
-label_0013: // LoopCopy1 
+label_0013: // LoopCopy1    核心循环，每次在K方向上做两次
 
 s_waitcnt lgkmcnt(0)                               // lgkmcnt=0 vmcnt=-11wait for local write
 
