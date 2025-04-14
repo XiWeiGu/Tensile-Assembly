@@ -238,7 +238,7 @@ Cij_Aik_Bkj_S_MT64x64x4_SN_K1_SVW1_WGM1(
 
   /* local read addresses: final offsets a */
 
-  unsigned int localReadOffsetA = lr0I*VECTOR_WIDTH + sgId*(MT0I+PAD);
+  unsigned int localReadOffsetA = lr0I*VECTOR_WIDTH + sgId*(MT0I+PAD); // sgId用来区分subgroup,在开启LocalSplit时会有subgroup概念
 
 
   /* local read addresses: final offsets b */
@@ -561,6 +561,7 @@ Cij_Aik_Bkj_S_MT64x64x4_SN_K1_SVW1_WGM1(
 
 
     /* local read a */
+    // 由于VW = 4, 一次只能连续读4个,但是TT=8,另外4个跨步长的读.
     rA[0*VECTOR_WIDTH+0] = localReadA[0*SG0I*VECTOR_WIDTH + 0]; 
     rA[0*VECTOR_WIDTH+1] = localReadA[0*SG0I*VECTOR_WIDTH + 1]; 
     rA[0*VECTOR_WIDTH+2] = localReadA[0*SG0I*VECTOR_WIDTH + 2]; 

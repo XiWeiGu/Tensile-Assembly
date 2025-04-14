@@ -1010,7 +1010,7 @@ _v_add_lshl_u32 v[vgprLocalReadAddrB], v0, v3, 0x2 // Final Offset: offset = (lr
 
 
 /* local read addresses: declare addresses b */
-
+// 加上A的大小
 _v_add_co_u32 v[vgprLocalReadAddrB+0], vcc, 0x400, v[vgprLocalReadAddrB+0] //  += LdsOffsetB (lower)
 
 
