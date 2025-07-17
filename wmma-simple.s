@@ -1710,6 +1710,7 @@ v_mul_lo_u32 v13, v11, s[sgprStrideD1J]            //  offset 1
 v_and_b32 v15, 0, v14                              // v15 = v14 % 1
 v_and_b32 v10, 15, v[vgprSerial]                   // v10 = v[vgprSerial] % 16
 _v_add_lshl_u32 v10, v15, v10, 0                   // coordination 0 = vwa *(wave_id0 + tid0)
+
 s_mul_i32 s6, 16, s[sgprWorkGroup0]                // wgp0 * MT0
 _v_add_u32 v10, s6, v10                            // coord 0 = (tid0/MI_m)*4 + waveG0*MIB_m + MT0*SG0
 s_mul_i32 s6, 16, s[sgprWorkGroup1]                // wgp1 * MT1
@@ -1807,7 +1808,7 @@ GW_B0_E1_20:
 /* (d1,vc1,d0,vc0)=(0,0,0,0) */
 v_cmp_lt_u32 s48, v10, s[sgprSizeI]                // coord0 < size0
 v_cmp_lt_u32 s50, v11, s[sgprSizeJ]                // coord1 < size1
-s_and_b32 s50, s48, s50                            // in0 && in1
+s_and_b32 s50, s48, s50                            // in0 && in1, v10 v11均未越界s50=1, 否者s50=0
 _v_add_lshl_u32 v16, v13, v10, 0x1                 // scaleToBpe: accumulate d0 lower and *= bpe into Cin addr
 v_cndmask_b32 v16, -1, v16, s50                    // LDD clip if OOB. offset
 /* (d1,vc1,d0,vc0)=(1,0,0,0) */
