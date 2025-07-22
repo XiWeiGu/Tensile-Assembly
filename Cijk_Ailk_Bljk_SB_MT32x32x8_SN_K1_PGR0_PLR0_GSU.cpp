@@ -125,7 +125,7 @@ __device__ inline double atomicAddType(double *fPtr, double operand)
 /* MAC's */
 #define MAC(A,B,DST) DST += A*B
 #define TYPE_MAC(MULA,MULB,DST) DST = MAC(MULA,MULB,DST);
-#define TYPE_MAC_WRITE(DST,SRC,ALPHA,REG,BETA) atomicAddType(&(DST), (ALPHA)*(REG));
+#define TYPE_MAC_WRITE(DST,SRC,ALPHA,REG,BETA) atomicAddType(&(DST), (ALPHA)*(REG)); // 同一个GSU里面的rC需要原子累加
 /* 2x2 micro-tile */
 #define MAC_2x2\
   TYPE_MAC(rA[0],rB[0],rC[0+0*TT0I]); \
@@ -195,7 +195,7 @@ Cijk_Ailk_Bljk_SB_MT32x32x8_SN_K1_PGR0_PLR0(
   DATA_TYPE b_0_0_0_0;
 
   /* allocate local memory */
-  __shared__ DATA_TYPE localMemory[LDS_NUM_ELEMENTS];
+  __shared__ DATA_TYPE localMemory[LDS_NUM_ELEMENTS]; // 32x32x8 (32 x 8) + (32 x 8)
 
   typedef struct MagicStruct {unsigned M; int a; int s;} MagicStruct;
   const unsigned MAGIC_STRUCT_A = 0x80000000; // for extracting a-bit from shift kernarg
@@ -245,10 +245,10 @@ Cijk_Ailk_Bljk_SB_MT32x32x8_SN_K1_PGR0_PLR0(
   unsigned int wg1J = hc_get_group_id(1);
   unsigned int nwg0I = hc_get_num_groups(0);
   unsigned int nwg1J = hc_get_num_groups(1);
-  nwg1J /= GLOBAL_SPLITU;
+  nwg1J /= GLOBAL_SPLITU;           // GSU Num
   unsigned int gsuSumIdx;
-  gsuSumIdx = wg1J % GLOBAL_SPLITU;
-  wg1J = wg1J / GLOBAL_SPLITU;
+  gsuSumIdx = wg1J % GLOBAL_SPLITU; // GSU内部ID
+  wg1J = wg1J / GLOBAL_SPLITU;      // GSU ID
 
 
   /* global read addresses: tile offset assignment a */
@@ -322,7 +322,7 @@ Cijk_Ailk_Bljk_SB_MT32x32x8_SN_K1_PGR0_PLR0(
 
   /* global read addresses: increments a */
 
-  int64_t globalReadIncAL = (int64_t)strideAL*LOCAL_DEPTHU*GLOBAL_SPLITU;
+  int64_t globalReadIncAL = (int64_t)strideAL*LOCAL_DEPTHU*GLOBAL_SPLITU;  // 包括GSU的长度
 
 
   /* global read addresses: increments b */
@@ -396,8 +396,9 @@ Cijk_Ailk_Bljk_SB_MT32x32x8_SN_K1_PGR0_PLR0(
 
 
   /* Compute summation loop num iter */
+  // 计算开启GSU之后的迭代次数
   if(alpha == (float)(0)) sizeL = 0;  // Short circuit check alpha=0, skip A*B 
-  unsigned int numIterMyWg = (sizeL / LOCAL_DEPTHU) / GLOBAL_SPLITU;
+  unsigned int numIterMyWg = (sizeL / LOCAL_DEPTHU) / GLOBAL_SPLITU; // K方向上的迭代次数
   unsigned int numIterPerWgRemainder = (sizeL / LOCAL_DEPTHU) % GLOBAL_SPLITU;
   if (gsuSumIdx < numIterPerWgRemainder) {
     numIterMyWg ++;
